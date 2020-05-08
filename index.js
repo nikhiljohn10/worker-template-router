@@ -1,4 +1,4 @@
-const Router = require('./router')
+const App = require('./router')
 
 /**
  * Example of how router can be used in an application
@@ -7,24 +7,20 @@ addEventListener('fetch', event => {
     event.respondWith(handleRequest(event.request))
 })
 
-function handler(request) {
-    const init = {
-        headers: { 'content-type': 'application/json' },
-    }
-    const body = JSON.stringify({ some: 'json' })
-    return new Response(body, init)
+function handler(req, res) {
+    return res.json({ some: 'json' })
 }
 
 async function handleRequest(request) {
-    const r = new Router("/api/v1") // The base path is passed as parameter
+    const app = new App()
     // Replace with the approriate paths and handlers
-    r.get('.*/bar', () => new Response('responding for /bar'))
-    r.get('.*/foo', req => handler(req))
-    r.post('.*/foo.*', req => handler(req))
-    r.get('/demos/router/foo', req => fetch(req)) // return the response from the origin
+    app.get('.*/bar', () => new Response('responding for /bar'))
+    app.get('.*/foo', (req, res) => handler(req, res))
+    app.post('.*/foo.*', (req, res) => res.json({ some: 'more json' }))
+    app.get('/demos/router/foo', (req, res) => res.fetch(req)) // return the response from the origin
 
-    r.get('/', () => new Response('Hello worker!')) // return a default message for the root route
+    app.get('/', () => new Response('Hello worker!')) // return a default message for the root route
 
-    const resp = await r.route(request)
+    const resp = await app.route(request)
     return resp
 }

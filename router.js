@@ -3,8 +3,9 @@
  * boolean indicating if the request uses that HTTP method,
  * header, host or referrer.
  */
+const WorkerResponse = require('./response')
 const Method = method => req =>
-    req.method.toLowerCase() === method.toLowerCase()
+  req.method.toLowerCase() === method.toLowerCase()
 const Connect = Method('connect')
 const Delete = Method('delete')
 const Get = Method('get')
@@ -18,13 +19,35 @@ const Trace = Method('trace')
 const Header = (header, val) => req => req.headers.get(header) === val
 const Host = host => Header('host', host.toLowerCase())
 const Referrer = host => Header('referrer', host.toLowerCase())
-const AddSlash = s => s.replace(/\/$/,"")+"/"
+const AddSlash = s => s.replace(/\/$/, "") + "/"
+
+const LoadParams = (path, base) => req => {
+  const urlPath = req.url.replace(base, "")
+  var params = {}
+  var ParamValues = urlPath.split("/")
+  var Keys = path.split("/")
+  ParamValues.reverse()
+  Keys.reverse()
+  for (let key in Keys) {
+    const paramKey = Keys[key]
+    if (paramKey.includes(":")) {
+      params[paramKey.replace(':', '')] = ParamValues[key]
+    }
+  }
+  return params
+}
 
 const Path = regExp => req => {
-    const url = new URL(req.url)
-    const path = AddSlash(url.pathname)
-    const match = path.match(regExp) || []
-    return match[0] === path
+  const url = new URL(req.url)
+  var expr = AddSlash(regExp)
+  const path = AddSlash(url.pathname)
+  const alphanum = new RegExp(/\:[\w\d]+/, "gi")
+  const newPath = expr.replace(alphanum, alphanum.source.toString())
+  if (expr != newPath) {
+    expr = new RegExp(newPath.replace(/\\:/g, ''))
+  }
+  const match = path.match(expr) || []
+  return match[0] === path
 }
 
 /**
@@ -32,92 +55,95 @@ const Path = regExp => req => {
  * conditions present for each request.
  */
 class Router {
-    constructor(base) {
-        this.base = base?base.replace(/\/$/,""):""
-        this.routes = []
+  constructor() {
+    this.base = base ? base.replace(/\/$/, "") : ""
+    this.routes = []
+  }
+
+  handle(conditions, handler) {
+    this.routes.push({
+      conditions,
+      handler,
+      params
+    })
+    return this
+  }
+
+  connect(url, handler) {
+    return this.handle([Connect, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  delete(url, handler) {
+    return this.handle([Delete, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  get(url, handler) {
+    return this.handle([Get, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  head(url, handler) {
+    return this.handle([Head, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  options(url, handler) {
+    return this.handle([Options, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  patch(url, handler) {
+    return this.handle([Patch, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  post(url, handler) {
+    return this.handle([Post, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  put(url, handler) {
+    return this.handle([Put, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  trace(url, handler) {
+    return this.handle([Trace, Path(this.base + url)], handler, LoadParams(url, this.base))
+  }
+
+  all(handler) {
+    return this.handle([], handler, LoadParams(url, this.base))
+  }
+
+  route(req) {
+    const route = this.resolve(req)
+    if (route) {
+      const response = new WorkerResponse()
+      var request = req
+      request['params'] = route.params(request)
+      return route.handler(request, response)
     }
 
-    handle(conditions, handler) {
-        this.routes.push({
-            conditions,
-            handler,
-        })
-        return this
-    }
+    return new Response('<h1>404: Page Not Found</h1>', {
+      status: 404,
+      statusText: 'not found',
+      headers: {
+        'content-type': 'text/html',
+      },
+    })
+  }
 
-    connect(url, handler) {
-        return this.handle([Connect, Path(this.base+AddSlash(url))], handler)
-    }
+  /**
+   * resolve returns the matching route for a request that returns
+   * true for all conditions (if any).
+   */
+  resolve(req) {
+    return this.routes.find(r => {
+      if (!r.conditions || (Array.isArray(r) && !r.conditions.length)) {
+        return true
+      }
 
-    delete(url, handler) {
-        return this.handle([Delete, Path(this.base+AddSlash(url))], handler)
-    }
+      if (typeof r.conditions === 'function') {
+        return r.conditions(req)
+      }
 
-    get(url, handler) {
-        return this.handle([Get, Path(this.base+AddSlash(url))], handler)
-    }
-
-    head(url, handler) {
-        return this.handle([Head, Path(this.base+AddSlash(url))], handler)
-    }
-
-    options(url, handler) {
-        return this.handle([Options, Path(this.base+AddSlash(url))], handler)
-    }
-
-    patch(url, handler) {
-        return this.handle([Patch, Path(this.base+AddSlash(url))], handler)
-    }
-
-    post(url, handler) {
-        return this.handle([Post, Path(this.base+AddSlash(url))], handler)
-    }
-
-    put(url, handler) {
-        return this.handle([Put, Path(this.base+AddSlash(url))], handler)
-    }
-
-    trace(url, handler) {
-        return this.handle([Trace, Path(this.base+AddSlash(url))], handler)
-    }
-
-    all(handler) {
-        return this.handle([], handler)
-    }
-
-    route(req) {
-        const route = this.resolve(req)
-
-        if (route) {
-            return route.handler(req)
-        }
-
-        return new Response('resource not found', {
-            status: 404,
-            statusText: 'not found',
-            headers: {
-                'content-type': 'text/plain',
-            },
-        })
-    }
-
-    /**
-     * resolve returns the matching route for a request that returns
-     * true for all conditions (if any).
-     */
-    resolve(req) {
-        return this.routes.find(r => {
-            if (!r.conditions || (Array.isArray(r) && !r.conditions.length)) {
-                return true
-            }
-
-            if (typeof r.conditions === 'function') {
-                return r.conditions(req)
-            }
-
-            return r.conditions.every(c => c(req))
-        })
-    }
+      return r.conditions.every(c => c(req))
+    })
+  }
 }
 
 module.exports = Router
